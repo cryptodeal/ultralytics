@@ -421,7 +421,33 @@ class AutoBackend(nn.Module):
             im = im.permute(0, 2, 3, 1)  # torch BCHW to numpy BHWC shape(1,320,192,3)
 
         if self.pt or self.nn_module:  # PyTorch
+            module_outs = {
+                id(model): (name, None, None) for name, model in self.model.named_modules()
+            }
+            hook = torch.nn.modules.module.register_module_forward_hook(
+                functools.partial(log_intermediary_values, module_outs)
+            )
             y = self.model(im, augment=augment, visualize=visualize, embed=embed)
+            hook.remove()
+            tensors = {}
+            for name, outputs, inputs in module_outs.values():
+                if re.match(r"^layers\.\d+.", name) and not name.startswith("layers.0"):
+                    # Only save first layer for a smaller file.
+                    continue
+                if name == "":
+                    # Skip the softmax output
+                    continue
+                if (outputs, inputs) == (None, None):
+                    print(f"no inputs/outputs for {name}")
+                    continue
+                for idx, inp in enumerate(inputs):
+                    tensors[f"{name}.in.{idx}"] = inp
+
+                for idx, out in enumerate(outputs):
+                    tensors[f"{name}.out.{idx}"] = out
+            import safetensors.torch
+
+            safetensors.torch.save_file(tensors, "yolov8n.pt.activations.safetensors")
         elif self.jit:  # TorchScript
             y = self.model(im)
         elif self.dnn:  # ONNX OpenCV DNN
