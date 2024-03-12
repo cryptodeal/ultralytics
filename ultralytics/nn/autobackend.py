@@ -13,10 +13,50 @@ import numpy as np
 import torch
 import torch.nn as nn
 from PIL import Image
+import functools
+import re
 
 from ultralytics.utils import ARM64, LINUX, LOGGER, ROOT, yaml_load
 from ultralytics.utils.checks import check_requirements, check_suffix, check_version, check_yaml
 from ultralytics.utils.downloads import attempt_download_asset, is_url
+
+
+def clone(x: torch.Tensor) -> torch.Tensor:
+    return x.detach().cpu().contiguous().clone()
+
+def log_intermediary_values(module_outs: dict, module, input, out) -> None:
+    name, prev_out, prev_in = module_outs.get(id(module), (None, None, None))
+    print(name)
+
+    if prev_out is not None:
+        return
+
+    if name is None:
+        print("err: unknown module", module.__class__)
+        breakpoint()
+        return
+
+    assert out is not None
+    outs = []
+    if isinstance(out, torch.Tensor):
+        outs.append(clone(out))
+    elif isinstance(out, (tuple, list)):
+        for i in out:
+            if isinstance(i, torch.Tensor):
+                outs.append(clone(i))
+            else:
+                outs.extend([clone(x) for x in i])
+    else:
+        print("err:", name, type(out))
+        breakpoint()
+    
+    inputs = []
+    for i in input:
+        if isinstance(i, torch.Tensor): 
+            inputs.append(clone(i))
+        elif isinstance(i, (tuple, list)):
+            inputs.extend([clone(x) for x in i])
+    module_outs[id(module)] = (name, outs, inputs)
 
 
 def check_class_names(names):

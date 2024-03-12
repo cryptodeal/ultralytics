@@ -6,6 +6,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import struct
 
 from ultralytics.nn.modules import (
     AIFI,
@@ -114,12 +115,23 @@ class BaseModel(nn.Module):
             (torch.Tensor): The last output of the model.
         """
         y, dt, embeddings = [], [], []  # outputs
+        count = 0
         for m in self.model:
+            print(count, ": ", m)
+            print(count, ": ", m.f)
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
                 self._profile_one_layer(m, x, dt)
+            if count == 0:
+                with open("img.bin", 'wb') as f:
+                    flat_data = x.flatten() if x.dim() > 1 else x
+                    torch_data = flat_data.contiguous().tolist() if flat_data.is_contiguous() == False else flat_data.tolist()
+                    bytes_data = struct.pack('=' + ('f' * len(torch_data)), *torch_data)
+                    f.write(bytes_data)
             x = m(x)  # run
+            if count == 0:
+                print(x)
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
@@ -127,6 +139,7 @@ class BaseModel(nn.Module):
                 embeddings.append(nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max(embed):
                     return torch.unbind(torch.cat(embeddings, 1), dim=0)
+            count += 1
         return x
 
     def _predict_augment(self, x):
